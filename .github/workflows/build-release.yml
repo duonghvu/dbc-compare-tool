@@ -1,0 +1,101 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows
+            gui_cmd: >
+              python -m PyInstaller --onefile --windowed
+              --name dbc_compare_gui dbc_compare_gui.py
+            cli_cmd: >
+              python -m PyInstaller --onefile --console
+              --name dbc_compare dbc_compare.py
+          - os: ubuntu-latest
+            artifact: linux
+            gui_cmd: >
+              python -m PyInstaller --onefile --windowed
+              --name dbc_compare_gui dbc_compare_gui.py
+            cli_cmd: >
+              python -m PyInstaller --onefile --console
+              --name dbc_compare dbc_compare.py
+          - os: macos-latest
+            artifact: macos
+            gui_cmd: >
+              python -m PyInstaller --onedir --windowed
+              --name "DBC Compare Tool" dbc_compare_gui.py
+            cli_cmd: >
+              python -m PyInstaller --onefile --console
+              --name dbc_compare dbc_compare.py
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyinstaller openpyxl fpdf2
+
+      - name: Build GUI
+        run: ${{ matrix.gui_cmd }}
+
+      - name: Build CLI
+        run: ${{ matrix.cli_cmd }}
+
+      - name: Package macOS app
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r ../dbc-compare-tool-macos.zip "DBC Compare Tool.app" dbc_compare
+
+      - name: Package Windows
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path dist\dbc_compare_gui.exe, dist\dbc_compare.exe -DestinationPath dbc-compare-tool-windows.zip
+
+      - name: Package Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd dist
+          tar czf ../dbc-compare-tool-linux.tar.gz dbc_compare_gui dbc_compare
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dbc-compare-tool-*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dbc-compare-tool-windows.zip
+            dbc-compare-tool-macos.zip
+            dbc-compare-tool-linux.tar.gz
+          generate_release_notes: true
